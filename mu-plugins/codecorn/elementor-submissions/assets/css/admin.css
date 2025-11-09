@@ -17,27 +17,63 @@
 
 /* Qui puoi mettere anche stile per thumbnails , lightbox , ecc .
    Se vuoi , puoi spostare la <style> della media preview qui e ripulire il JS . */
-
-<style > .cc-ef-media-wrapper {
+/* Wrapper TD con più media */
+.cc-ef-media-multi {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
 }
 
+/* Singolo media wrapper */
+.cc-ef-media-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: #f6f7f8;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Thumbnail (img/video) */
 .cc-ef-media-thumb {
-  max-width: 140px;
-  max-height: 90px;
+  max-width: 160px;
+  max-height: 100px;
   border-radius: 4px;
   object-fit: cover;
+  display: block;
+  margin: auto;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
-.cc-ef-media-meta a {
-  font-size: 11px;
-  word-break: break-all;
+/* Meta e pulsante download */
+.cc-ef-media-meta {
+  text-align: center;
 }
 
+.cc-ef-media-download {
+  display: inline-block;
+  background: #111;
+  color: #fff !important;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.cc-ef-media-download:hover {
+  background: #333;
+}
+
+/* Lightbox */
 .cc-ef-lightbox {
   position: fixed;
   inset: 0;
@@ -66,11 +102,14 @@
   max-height: 80vh;
 }
 
-.cc-ef-lightbox-close {
-  float: right;
+.cc-ef-lightbox-header {
+  display: flex;
+  justify-content: space-between;
   margin-bottom: 8px;
 }
+
 button.button.button-secondary.cc-ef-lightbox-close {
+  float: right;
   margin-bottom: 5px;
   margin-top: -4px;
 }

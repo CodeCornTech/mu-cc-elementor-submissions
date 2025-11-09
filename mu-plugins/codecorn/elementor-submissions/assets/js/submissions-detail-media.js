@@ -15,8 +15,11 @@ jQuery(function ($) {
   }, 300);
 
   /**
-   * Richiede al server la secure URL per un media di Elementor forms .
-   * Se qualcosa va storto , torna comunque l’ URL originale .
+   * Richiede al server la secure URL per un media di Elementor forms.
+   * Se qualcosa va storto, torna comunque l’URL originale.
+   *
+   * @param {string} originalUrl
+   * @param {function(string)} cb
    */
   function getSecureUrl(originalUrl, cb) {
     if (
@@ -45,92 +48,98 @@ jQuery(function ($) {
           cb(resp.data.secure);
         } else {
           THIS_DBG &&
-            console.warn(
-              "[CC_ES] secure url fallita , uso originale",
-              resp
-            );
+            console.warn("[CC_ES] secure url fallita , uso originale", resp);
           cb(originalUrl);
         }
       }
     );
   }
-
   function initMediaPreview() {
     const $rows = $(".e-form-submissions-item-table tr");
 
     $rows.each(function () {
       const $valueCell = $(this).find("td").eq(1);
-      const $link = $valueCell.find('a[href^="http"]').first();
-      THIS_DBG && console.log("$link.length", $link?.length || 0);
-      if (!$link.length) return;
+      const $links = $valueCell.find('a[href^="http"]');
+      if (!$links.length) return;
 
-      const href = $link.attr("href") || "";
+      let cleared = false;
+      let appended = 0;
 
-      // Skippa email , link generici ecc .
-      if (!href || href.indexOf("uploads/") === -1) return;
+      $links.each(function () {
+        const $link = $(this);
+        const href = $link.attr("href") || "";
+        if (!href || href.indexOf("uploads/") === -1) return;
 
-      // Prima chiediamo la versione hashata al server , poi montiamo preview
-      getSecureUrl(href, function (secureUrl) {
-        if (imgRegex.test(href)) {
-          makeImagePreview($valueCell, secureUrl);
-        } else if (vidRegex.test(href)) {
-          makeVideoPreview($valueCell, secureUrl);
-        }
+        const isImg = imgRegex.test(href);
+        const isVid = vidRegex.test(href);
+        if (!isImg && !isVid) return;
+
+        getSecureUrl(href, function (secureUrl) {
+          if (!cleared) {
+            $valueCell.empty().addClass("cc-ef-media-multi");
+            cleared = true;
+          }
+
+          if (isImg) {
+            $valueCell.append(makeImagePreviewElement(secureUrl));
+          } else if (isVid) {
+            $valueCell.append(makeVideoPreviewElement(secureUrl));
+          }
+
+          appended++;
+          THIS_DBG && console.log("Appended media", appended);
+        });
       });
     });
   }
 
-  function makeImagePreview($cell, url) {
+  function makeImagePreviewElement(url) {
     const $wrapper = $('<div class="cc-ef-media-wrapper" />');
     const $thumbLink = $('<a class="cc-ef-media-thumb-link" href="#" />');
     const $thumb = $(
       '<img class="cc-ef-media-thumb" loading="lazy" alt="Anteprima" />'
     ).attr("src", url);
-
     $thumbLink.append($thumb);
     $wrapper.append($thumbLink);
 
-    const $meta = $('<div class="cc-ef-media-meta" />').append(
-      $('<a target="_blank" rel="noreferrer">Apri file originale</a>').attr(
-        "href",
-        url
-      )
-    );
+    const $meta = $('<div class="cc-ef-media-meta" />');
+    const $openLink = $(
+      '<a class="cc-ef-media-download button button-small button-primary" target="_blank" rel="noreferrer">Scarica Foto</a>'
+    ).attr("href", url);
+    $meta.append($openLink);
     $wrapper.append($meta);
-
-    $cell.empty().append($wrapper);
 
     $thumbLink.on("click", function (e) {
       e.preventDefault();
       openLightbox("image", url);
     });
+
+    return $wrapper;
   }
 
-  function makeVideoPreview($cell, url) {
+  function makeVideoPreviewElement(url) {
     const $wrapper = $('<div class="cc-ef-media-wrapper" />');
     const $thumbLink = $('<a class="cc-ef-media-thumb-link" href="#" />');
     const $video = $('<video class="cc-ef-media-thumb" muted />').attr(
       "src",
       url
     );
-
     $thumbLink.append($video);
     $wrapper.append($thumbLink);
 
-    const $meta = $('<div class="cc-ef-media-meta" />').append(
-      $('<a target="_blank" rel="noreferrer">Apri video originale</a>').attr(
-        "href",
-        url
-      )
-    );
+    const $meta = $('<div class="cc-ef-media-meta" />');
+    const $openLink = $(
+      '<a class="cc-ef-media-download button button-small button-primary" target="_blank" rel="noreferrer">Scarica Video</a>'
+    ).attr("href", url);
+    $meta.append($openLink);
     $wrapper.append($meta);
-
-    $cell.empty().append($wrapper);
 
     $thumbLink.on("click", function (e) {
       e.preventDefault();
       openLightbox("video", url);
     });
+
+    return $wrapper;
   }
 
   function ensureLightbox() {
@@ -140,7 +149,7 @@ jQuery(function ($) {
         <div class="cc-ef-lightbox">
           <div class="cc-ef-lightbox-inner">
             <div class="cc-ef-lightbox-header">
-              <a href="#" class="button button-secondary button-small cc-ef-lightbox-download" download>Scarica</a>
+              <a href="#" class="button button-secondary button-small button-primary cc-ef-lightbox-download" download>Scarica</a>
               <button type="button" class="button button-secondary cc-ef-lightbox-close">Chiudi</button>
             </div>
             <div class="cc-ef-lightbox-content"></div>

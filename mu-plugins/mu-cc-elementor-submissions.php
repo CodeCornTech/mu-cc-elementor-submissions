@@ -4,7 +4,7 @@
  * Plugin Name: MU CC Elementor Submissions
  * Description: Strumenti MU per Elementor Pro Submissions : pulizia campi HTML , menu Preventivi , colonna "Letta" , anteprima media nella scheda submission .
  * Author: CodeCorn™
- * Version: 1.0.3
+ * Version: 1.0.4
  * License: GPL-2.0-or-later
  */
 
@@ -37,7 +37,7 @@ final class Plugin
     {
         // base
         if (! defined('MU_CC_ES_VERSION')) {
-            define('MU_CC_ES_VERSION', '1.0.3');
+            define('MU_CC_ES_VERSION', '1.0.4');
         }
 
         if (! defined('MU_CC_ES_DEBUG')) {
