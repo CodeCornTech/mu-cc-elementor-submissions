@@ -1,0 +1,76 @@
+/* Toolbar icon fine tuning */
+#wpadminbar #wp-admin-bar-cc-preventivi .ab-icon:before {
+  top: 2px;
+}
+
+/* Hack logo Elementor → Croce Auto Group */
+.e-logo-wrapper {
+  background: url("/wp-content/uploads/2025/04/croce-auto-group-@512-1-1.png") !important;
+  padding: 1.25em;
+  display: flex;
+  background-size: cover !important;
+}
+
+.e-logo-wrapper > * {
+  display: none !important;
+}
+
+/* Qui puoi mettere anche stile per thumbnails , lightbox , ecc .
+   Se vuoi , puoi spostare la <style> della media preview qui e ripulire il JS . */
+
+<style > .cc-ef-media-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.cc-ef-media-thumb {
+  max-width: 140px;
+  max-height: 90px;
+  border-radius: 4px;
+  object-fit: cover;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.cc-ef-media-meta a {
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.cc-ef-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+}
+
+.cc-ef-lightbox.is-visible {
+  display: flex;
+}
+
+.cc-ef-lightbox-inner {
+  background: #fff;
+  padding: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.cc-ef-lightbox-content img,
+.cc-ef-lightbox-content video {
+  max-width: 80vw;
+  max-height: 80vh;
+}
+
+.cc-ef-lightbox-close {
+  float: right;
+  margin-bottom: 8px;
+}
+button.button.button-secondary.cc-ef-lightbox-close {
+  margin-bottom: 5px;
+  margin-top: -4px;
+}
