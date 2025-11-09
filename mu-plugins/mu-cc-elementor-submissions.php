@@ -4,13 +4,15 @@
  * Plugin Name: MU CC Elementor Submissions
  * Description: Strumenti MU per Elementor Pro Submissions : pulizia campi HTML , menu Preventivi , colonna "Letta" , anteprima media nella scheda submission .
  * Author: CodeCorn™
- * Version: 1.0.0
+ * Version: 1.0.3
  * License: GPL-2.0-or-later
  */
 
 namespace MU_CC\ElementorSubmissions;
 
 defined('ABSPATH') || exit;
+
+use WP;
 
 final class Plugin
 {
@@ -35,7 +37,7 @@ final class Plugin
     {
         // base
         if (! defined('MU_CC_ES_VERSION')) {
-            define('MU_CC_ES_VERSION', '1.0.0');
+            define('MU_CC_ES_VERSION', '1.0.3');
         }
 
         if (! defined('MU_CC_ES_DEBUG')) {
@@ -74,10 +76,16 @@ final class Plugin
         if (! defined('CC_PREVENTIVI_LABEL')) {
             define('CC_PREVENTIVI_LABEL', __('Preventivi', 'cc'));
         }
+        if (! defined('MU_CC_ES_UPLOADS_SUBDIR')) {
+            // sottocartella da proteggere , relativa a wp-content/uploads
+            define('MU_CC_ES_UPLOADS_SUBDIR', 'elementor/forms');
+        }
     }
 
     private function hooks(): void
     {
+        add_action('init', [$this, 'define_cc_es_token']);
+
         // Elementor forms → pulizia campi HTML
         add_action('elementor_pro/forms/validation', [$this, 'on_forms_validation'], 99, 2);
         add_action('elementor_pro/forms/process',    [$this, 'on_forms_process'],    99, 2);
@@ -93,6 +101,17 @@ final class Plugin
 
         // Ajax colonna "Letta"
         add_action('wp_ajax_cc_sub_read', [$this, 'ajax_cc_sub_read']);
+
+        // Ajax secure URL per media submissions
+        add_action('wp_ajax_cc_sub_secure_url', [$this, 'ajax_cc_sub_secure_url']);
+
+        add_action('init', [$this, 'maybe_serve_secure_file']);
+
+        // 🔐 Auto-ensure .htaccess per uploads/elementor/forms
+        add_action('admin_init', [$this, 'maybe_ensure_forms_htaccess']);
+
+        // 🔒 filtro globale per URL media sicure (usato dal MU email)
+        add_filter('cc_es_secure_media_url', [$this, 'filter_secure_media_url'], 10, 1);
     }
 
     /*
@@ -121,13 +140,19 @@ final class Plugin
             error_log($prefix . $message);
         }
     }
-
     /*
      * ======================================================
      *  Helper interni
      * ======================================================
      */
 
+    public function define_cc_es_token(): void
+    {
+        if (!defined('MU_CC_ES_TOKEN_KEY')) {
+            // chiave di hashing → se vuoi puoi usare una tua stringa lunga
+            define('MU_CC_ES_TOKEN_KEY', wp_salt('mu-cc-elementor-submissions'));
+        }
+    }
     /**
      * True se la richiesta è verso la REST di Elementor Submissions .
      * In quel caso NON tocchiamo i campi .
@@ -182,6 +207,34 @@ final class Plugin
         self::log("filter → count prima : {$before} , dopo : {$after}");
 
         return $fields_arr;
+    }
+    /**
+     * Contenuto canonical del .htaccess in uploads/elementor/forms
+     */
+    private function get_forms_htaccess_contents(): string
+    {
+        return <<<HTACCESS
+# Niente listing directory
+Options -Indexes
+
+# Blocca accesso diretto ai file in questa cartella
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+    Deny from all
+</IfModule>
+
+# Regola storica : forzava "attachment"
+# Rimane qui per compatibilità , ma viene di fatto dopo il deny
+<IfModule mod_headers.c>
+    <Files "*">
+        Header set Content-Disposition attachment
+    </Files>
+</IfModule>
+
+HTACCESS;
     }
 
     /*
@@ -357,7 +410,49 @@ final class Plugin
                 MU_CC_ES_VERSION,
                 true
             );
+
+            // passa endpoint e nonce al JS di detail
+            wp_localize_script('mu-cc-es-submissions-detail', 'CCSUB_SEC', [
+                'ajax'  => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('cc-sub-sec'),
+            ]);
         }
+    }
+    public function ajax_cc_sub_secure_url(): void
+    {
+        check_ajax_referer('cc-sub-sec', 'nonce');
+
+        if (! current_user_can('manage_options')) {
+            wp_send_json_error('forbidden', 403);
+        }
+
+        $url = isset($_GET['url']) ? esc_url_raw(wp_unslash($_GET['url'])) : '';
+        if ($url === '') {
+            wp_send_json_error('missing_url');
+        }
+
+        $uploads = wp_get_upload_dir();
+        $baseurl = trailingslashit($uploads['baseurl']);
+
+        // deve essere un file negli uploads
+        if (stripos($url, $baseurl) !== 0) {
+            wp_send_json_error('not_uploads');
+        }
+
+        // path relativo rispetto a wp-content/uploads
+        $relative = ltrim(substr($url, strlen($baseurl)), '/');
+
+        // proteggiamo solo la nostra subdir elementor/forms
+        if (strpos($relative, MU_CC_ES_UPLOADS_SUBDIR . '/') !== 0) {
+            wp_send_json_error('not_protected_dir');
+        }
+
+        $secure = $this->build_secure_url($relative);
+
+        wp_send_json_success([
+            'secure'   => $secure,
+            'relative' => $relative,
+        ]);
     }
 
     /*
@@ -393,6 +488,203 @@ final class Plugin
         );
 
         wp_send_json_success(['is_read' => $is_read]);
+    }
+    private function generate_file_token(string $relative): string
+    {
+        // normalizza
+        $relative = ltrim($relative, '/');
+        return substr(hash_hmac('sha256', $relative, MU_CC_ES_TOKEN_KEY), 0, 32);
+    }
+
+    private function verify_file_token(string $relative, string $token): bool
+    {
+        $expected = $this->generate_file_token($relative);
+        // confronto constant time
+        return hash_equals($expected, $token);
+    }
+
+    /**
+     * Costruisce una URL sicura a partire da un path relativo agli uploads .
+     * Esempio input : elementor/forms/2025/11/file.pdf
+     */
+    public function build_secure_url(string $relative): string
+    {
+        $relative = ltrim($relative, '/');
+        $token    = $this->generate_file_token($relative);
+
+        return add_query_arg(
+            [
+                'cc_esf' => rawurlencode($relative),
+                'cc_t'   => $token,
+            ],
+            home_url('/')
+        );
+    }
+
+    ### 4 . Gatekeeper per il download
+    public function maybe_serve_secure_file(): void
+    {
+        if (empty($_GET['cc_esf']) || empty($_GET['cc_t'])) {
+            return;
+        }
+
+        $relative = rawurldecode((string) $_GET['cc_esf']);
+        $token    = (string) $_GET['cc_t'];
+
+        // normalizza path
+        $relative = ltrim($relative, '/');
+
+        // blocca path strani
+        if (strpos($relative, '..') !== false) {
+            wp_die('Invalid path', 403);
+        }
+
+        // deve iniziare con la subdir che vogliamo proteggere
+        if (
+            strpos($relative, MU_CC_ES_UPLOADS_SUBDIR . '/') !== 0
+            && $relative !== MU_CC_ES_UPLOADS_SUBDIR
+        ) {
+            wp_die('Not allowed', 403);
+        }
+
+        // path assoluto nel filesystem
+        $uploads = wp_get_upload_dir();
+        $file    = trailingslashit($uploads['basedir']) . $relative;
+
+        if (! file_exists($file) || ! is_file($file)) {
+            status_header(404);
+            exit;
+        }
+
+        // 1 ) Admin loggato → bypass token
+        if (is_user_logged_in() && current_user_can('manage_options')) {
+            // ok
+        } else {
+            // 2 ) Non admin → deve avere token valido
+            if (! $this->verify_file_token($relative, $token)) {
+                wp_die('Forbidden', 403);
+            }
+        }
+
+        // serve file
+        $this->serve_file_download($file);
+        exit;
+    }
+
+    /**
+     * Output del file con header corretti .
+     */
+    private function serve_file_download(string $file): void
+    {
+        $mime = wp_check_filetype(basename($file));
+        $type = $mime['type'] ?: 'application/octet-stream';
+
+        if (! headers_sent()) {
+            nocache_headers();
+            header('Content-Type: ' . $type);
+            header('Content-Length: ' . filesize($file));
+            header('Content-Disposition: inline; filename="' . basename($file) . '"');
+        }
+
+        // pulisci buffer
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        readfile($file);
+    }
+    /**
+     * Filtro globale: converte una URL media in URL sicura, se punta a elementor/forms.
+     * Usato dal MU dell’email template.
+     *
+     * @param string $url URL originale (uploads)
+     * @return string URL sicura (cc_esf/cc_t) o l'originale se non tocca a noi
+     */
+    public function filter_secure_media_url(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return $url;
+        }
+
+        // se è già una nostra URL gateway, lascia stare
+        if (strpos($url, 'cc_esf=') !== false && strpos($url, 'cc_t=') !== false) {
+            return $url;
+        }
+
+        $uploads = wp_get_upload_dir();
+        $baseurl = trailingslashit($uploads['baseurl']);
+
+        // deve essere sotto uploads
+        if (stripos($url, $baseurl) !== 0) {
+            return $url;
+        }
+
+        // path relativo rispetto a wp-content/uploads
+        $relative = ltrim(substr($url, strlen($baseurl)), '/');
+
+        // proteggiamo solo la nostra subdir elementor/forms
+        if (strpos($relative, MU_CC_ES_UPLOADS_SUBDIR . '/') !== 0) {
+            return $url;
+        }
+
+        // costruisci URL sicura type-safe
+        return $this->build_secure_url($relative);
+    }
+    /**
+     * Crea / riallinea il .htaccess di uploads/elementor/forms in modo idempotente.
+     * Gira solo in admin e solo per utenti con manage_options.
+     */
+    public function maybe_ensure_forms_htaccess(): void
+    {
+        if (! is_admin() || ! current_user_can('manage_options')) {
+            return;
+        }
+
+        // evitiamo di fare I/O ad ogni admin_init: usiamo una firma in opzione
+        $option_key   = 'mu_cc_es_forms_htaccess_sig';
+        $desired      = $this->get_forms_htaccess_contents();
+        $desired_sig  = md5($desired);
+        $stored_sig   = (string) get_option($option_key, '');
+
+        // se è già allineato secondo noi, stop
+        if ($stored_sig === $desired_sig) {
+            return;
+        }
+
+        $uploads = wp_get_upload_dir();
+        if (empty($uploads['basedir'])) {
+            return;
+        }
+
+        // cartella elementor/forms
+        $forms_dir = trailingslashit($uploads['basedir']) . MU_CC_ES_UPLOADS_SUBDIR;
+
+        // assicurati che la dir esista
+        if (! is_dir($forms_dir)) {
+            wp_mkdir_p($forms_dir);
+        }
+
+        $htaccess_path = trailingslashit($forms_dir) . '.htaccess';
+
+        // prova a scrivere il file
+        $result = @file_put_contents($htaccess_path, $desired);
+
+        if ($result === false) {
+            // opzionale: logga in debug se non riusciamo a scrivere
+            self::log('HTACCESS_WRITE_FAIL', [
+                'path' => $htaccess_path,
+            ]);
+            return;
+        }
+
+        // aggiorna la firma memorizzata
+        update_option($option_key, $desired_sig);
+
+        self::log('HTACCESS_SYNCED', [
+            'path' => $htaccess_path,
+            'sig'  => $desired_sig,
+        ]);
     }
 }
 
